@@ -12,6 +12,9 @@ const error = (input: string) => {
   process.exit(1);
 };
 
+const ignoreAttr = "x-bundler-ignore";
+
+// Context we operate on.
 type BundlerContext = {
   htmlDirPath: string;
   doc: Document;
@@ -23,12 +26,14 @@ type ReplaceableCssRef = {
   absoluteStylePath: string;
 };
 
+// Any <script src="whatever">, other script elements are ignored (those without src="...")
 type ReplaceableScriptRef = {
   origTag: HTMLScriptElement;
   mountPoint: HTMLElement;
   absoluteScriptPath: string;
 };
 
+// Finds all link rel stylesheets and returns them
 const findReplaceableCssRefs = ({
   htmlDirPath: htmlFilePath,
   doc,
@@ -37,6 +42,11 @@ const findReplaceableCssRefs = ({
   const result: ReplaceableCssRef[] = [];
 
   for (const element of allLinkElements) {
+    if (element.hasAttribute(ignoreAttr)) {
+      element.removeAttribute(ignoreAttr);
+      continue;
+    }
+
     if (
       element.getAttribute("rel") === "stylesheet" &&
       element.getAttribute("href")?.endsWith(".css")
@@ -55,6 +65,7 @@ const findReplaceableCssRefs = ({
   return result;
 };
 
+// Finds all script srcs and returns them
 const findReplaceableScriptRefs = ({
   htmlDirPath: htmlFilePath,
   doc,
@@ -63,6 +74,11 @@ const findReplaceableScriptRefs = ({
   const result: ReplaceableScriptRef[] = [];
 
   for (const element of allScriptElements) {
+    if (element.hasAttribute(ignoreAttr)) {
+      element.removeAttribute(ignoreAttr);
+      continue;
+    }
+
     if (
       element.getAttribute("src")?.endsWith(".js") &&
       !element.textContent?.trim()
@@ -84,6 +100,8 @@ const findReplaceableScriptRefs = ({
   return result;
 };
 
+// Replaces the passed node (1) with a comment with the node's content as the comment in the passed document (2)
+// and optionally appends the additional child (3) after the comment.
 const replaceWithComment = (
   node: HTMLElement,
   doc: Document,
@@ -99,6 +117,7 @@ const replaceWithComment = (
   }
 };
 
+// Replaces all passed cssRefs and scriptRefs with inlined js/css content (that is, the file is read and copied into the tag)
 const replaceTags = (
   cssRefs: ReplaceableCssRef[],
   scriptRefs: ReplaceableScriptRef[],
@@ -125,6 +144,7 @@ const replaceTags = (
   }
 
   // Now the script blocks, which need to be mounted in their original locations
+  // Also copies over attributes from script tags.
   for (const scriptRef of scriptRefs) {
     let content = "";
     try {
@@ -141,6 +161,17 @@ const replaceTags = (
 
     const newScriptTag = doc.createElement("script");
     newScriptTag.textContent = content;
+
+    // Copy attributes
+    for (const attrName of scriptRef.origTag.getAttributeNames()) {
+      if (attrName !== "src") {
+        newScriptTag.setAttribute(
+          attrName,
+          scriptRef.origTag.getAttribute(attrName)!
+        );
+      }
+    }
+
     replaceWithComment(scriptRef.origTag, doc, newScriptTag);
   }
 
