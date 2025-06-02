@@ -1,6 +1,7 @@
+import { readFileSync, writeFileSync } from "node:fs";
+
 import { JSDOM } from "jsdom";
 import path from "node:path";
-import { readFileSync } from "node:fs";
 
 const logBase = (tag: string) => `[${tag}][${new Date().toLocaleString()}]`;
 
@@ -49,7 +50,8 @@ const findReplaceableCssRefs = ({
 
     if (
       element.getAttribute("rel") === "stylesheet" &&
-      element.getAttribute("href")?.endsWith(".css")
+      element.getAttribute("href")?.endsWith(".css") &&
+      !element.getAttribute("href")!.match(/^http(s)?:\/\//)
     ) {
       const relativeCssPath = element.getAttribute("href")!;
       const absPath = path.resolve(path.join(htmlFilePath, relativeCssPath));
@@ -81,6 +83,7 @@ const findReplaceableScriptRefs = ({
 
     if (
       element.getAttribute("src")?.endsWith(".js") &&
+      !element.getAttribute("src")!.match(/^http(s)?:\/\//) &&
       !element.textContent?.trim()
     ) {
       const relativeScriptPath = element.getAttribute("src")!;
@@ -91,12 +94,10 @@ const findReplaceableScriptRefs = ({
         mountPoint: element.parentElement!,
         absoluteScriptPath: absPath,
       });
-    } else {
-      warn("Found script tag with no valid src attribute or non-empty content");
     }
   }
 
-  info(`Found ${result.length} replaceable JS <script> tags`);
+  info(`Found ${result.length} replaceable JS <script> tag(s)`);
   return result;
 };
 
@@ -143,6 +144,8 @@ const replaceTags = (
     replaceWithComment(cssRef.origTag, doc);
   }
 
+  info(`CSS files concatenated, total size ${styleData.length} bytes`);
+
   // Now the script blocks, which need to be mounted in their original locations
   // Also copies over attributes from script tags.
   for (const scriptRef of scriptRefs) {
@@ -173,6 +176,11 @@ const replaceTags = (
     }
 
     replaceWithComment(scriptRef.origTag, doc, newScriptTag);
+    info(
+      `Added script tag from ${scriptRef.origTag.getAttribute("src")}, copied ${
+        content.length
+      } bytes`
+    );
   }
 
   const styleElement = doc.createElement("style");
@@ -188,16 +196,42 @@ const replaceTags = (
   headElement.appendChild(styleElement);
 };
 
-const htmlpath = "src/html/index.html";
-const parsedDoc = new JSDOM(readFileSync(htmlpath)).window.document;
+const main = (args: string[]) => {
+  const startTime = new Date().getTime();
+  if (args.length < 1 || args.length > 2) {
+    error("Usage: input.html [output.html]");
+  }
 
-console.log(parsedDoc.documentElement.outerHTML);
+  const inputPath = args[0];
+  const outputPath = args[1];
 
-const context = { htmlDirPath: "src/html", doc: parsedDoc };
-replaceTags(
-  findReplaceableCssRefs(context),
-  findReplaceableScriptRefs(context),
-  context
-);
+  const inputData = readFileSync(inputPath, { encoding: "utf-8" });
+  const relativeBase = path.dirname(inputPath);
 
-console.log(parsedDoc.documentElement.outerHTML);
+  const document = new JSDOM(inputData).window.document;
+  const ctx: BundlerContext = { doc: document, htmlDirPath: relativeBase };
+
+  const cssRefs = findReplaceableCssRefs(ctx);
+  const jsRefs = findReplaceableScriptRefs(ctx);
+
+  replaceTags(cssRefs, jsRefs, ctx);
+  const outputData = `<!DOCTYPE html>\n${document.documentElement.outerHTML}`;
+
+  if (!outputPath) {
+    console.log(outputData);
+  } else {
+    writeFileSync(outputPath, outputData);
+  }
+
+  info(
+    `Wrote ${outputData.length} bytes in ${
+      (new Date().getTime() - startTime) / 1000
+    }s`
+  );
+};
+
+const argv = process.argv;
+argv.shift();
+argv.shift();
+
+main(argv);
