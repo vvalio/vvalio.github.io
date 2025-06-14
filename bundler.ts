@@ -14,11 +14,19 @@ const error = (input: string) => {
 };
 
 const ignoreAttr = "x-bundler-ignore";
+const configFile = "bundler.config.json";
+
+// Bundler configuration file
+type BundlerConfig = {
+  inputPath: string;
+  outputPath: string;
+};
 
 // Context we operate on.
 type BundlerContext = {
   htmlDirPath: string;
   doc: Document;
+  config: BundlerConfig;
 };
 
 // Any <link rel="stylesheet"> that also has a href attribute ending with .css
@@ -32,6 +40,21 @@ type ReplaceableScriptRef = {
   origTag: HTMLScriptElement;
   mountPoint: HTMLElement;
   absoluteScriptPath: string;
+};
+
+// Reads the config from the file
+const readConfig = (): BundlerConfig => {
+  const configData = readFileSync(configFile, { encoding: "utf-8" });
+  const parsedConfig = JSON.parse(configData);
+
+  if (!(parsedConfig.inputPath && parsedConfig.outputPath)) {
+    error("Must define inputPath and outputPath");
+  }
+
+  return {
+    inputPath: parsedConfig.inputPath!,
+    outputPath: parsedConfig.outputPath!,
+  };
 };
 
 // Finds all link rel stylesheets and returns them
@@ -196,20 +219,29 @@ const replaceTags = (
   headElement.appendChild(styleElement);
 };
 
-const main = (args: string[]) => {
+const main = () => {
   const startTime = new Date().getTime();
-  if (args.length < 1 || args.length > 2) {
-    error("Usage: input.html [output.html]");
+
+  let config: BundlerConfig;
+  try {
+    config = readConfig();
+  } catch (err) {
+    error(`Failed to read bundler config: ${err}`);
+    return; // for typescript
   }
 
-  const inputPath = args[0];
-  const outputPath = args[1];
+  const inputPath = config.inputPath;
+  const outputPath = config.outputPath;
 
   const inputData = readFileSync(inputPath, { encoding: "utf-8" });
   const relativeBase = path.dirname(inputPath);
 
   const document = new JSDOM(inputData).window.document;
-  const ctx: BundlerContext = { doc: document, htmlDirPath: relativeBase };
+  const ctx: BundlerContext = {
+    doc: document,
+    htmlDirPath: relativeBase,
+    config,
+  };
 
   const cssRefs = findReplaceableCssRefs(ctx);
   const jsRefs = findReplaceableScriptRefs(ctx);
@@ -230,8 +262,4 @@ const main = (args: string[]) => {
   );
 };
 
-const argv = process.argv;
-argv.shift();
-argv.shift();
-
-main(argv);
+main();
