@@ -1,4 +1,4 @@
-import { readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 
 import { JSDOM } from "jsdom";
 import path from "node:path";
@@ -219,6 +219,16 @@ const replaceTags = (
   headElement.appendChild(styleElement);
 };
 
+// Write output file, create dirs if necessary
+const writeOutputFile = (outputPath: string, fileContents: string) => {
+  const dirs = path.dirname(outputPath);
+  if (!existsSync(dirs)) {
+    mkdirSync(dirs, { recursive: true });
+  }
+
+  writeFileSync(outputPath, fileContents, { encoding: "utf-8" });
+};
+
 const main = () => {
   const startTime = new Date().getTime();
 
@@ -252,7 +262,7 @@ const main = () => {
   if (!outputPath) {
     console.log(outputData);
   } else {
-    writeFileSync(outputPath, outputData);
+    writeOutputFile(outputPath, outputData);
   }
 
   info(
